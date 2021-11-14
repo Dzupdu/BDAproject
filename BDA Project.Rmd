@@ -1,0 +1,226 @@
+---
+title: "project"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(rstan)
+options(mc.cores = parallel::detectCores())
+life_expectancy <- read_csv("life-expectancy.csv")
+```
+
+```{r}
+# 1. eritällään kaikki maiden ja maanosien nimet erikseen, omille listoille
+# Valtioille/maille
+maa_maara<-1
+maa<-c("Afghanistan")
+# Maanosille, kerätään manuaalisesti listaan
+maanosat <-c("Asia" ,"Northern America", "Africa", "Europe", "Australia", "Americas", "South Africa","Oceania", "Latin America and the Caribbean", "World")
+maanosat_maara <- length(maanosat)
+years <- 1950:2019
+
+
+for (i in 2:nrow(life_expectancy)){
+  if (life_expectancy$Entity[i]!=life_expectancy$Entity[i-1]){
+    if (!is.element(life_expectancy$Entity[i], maanosat)){
+      maa_maara<-maa_maara+1
+      maa<-append(maa,life_expectancy$Entity[i])
+    }
+  }
+}
+
+# 2. kerätään valtioiden elinikäodotukset omaan listaan ja sama maanosille oma lista.
+maat_arvot<-c()
+maanosa_arvot<-c()
+for (i in 1:length(life_expectancy$Entity)){
+  if(life_expectancy$Year[i]>=1950){
+    if (!is.element(life_expectancy$Entity[i], maanosat)){
+      maat_arvot<-append(maat_arvot,life_expectancy$`Life expectancy (years)`[i])
+    }
+    else{
+      maanosa_arvot<-append(maanosa_arvot,life_expectancy$`Life expectancy (years)`[i])
+    }
+  }
+}
+
+# 3. luodaan matsiisi jossa riveillä on valtioiden nimet/maanosan nimet 
+# ja sarakkaissa on vuosien 1950-2019 elinikäodotus arvot.
+
+# Valtioille/maille
+matriisi_maat<-matrix(nrow = maa_maara, ncol = 2020-1950+1)
+for (i in 1:maa_maara){
+  for (j in 1:70){
+    p<-i-1
+    matriisi_maat[i,j+1]<-maat_arvot[j+p*70]
+  }
+  matriisi_maat[i][]<-maa[i]
+}
+
+# Maanosille 
+matriisi_maanosat<-matrix(nrow = maanosat_maara, ncol = 2020-1950+1)
+for (i in 1:maanosat_maara){
+  for (j in 1:70){
+    p<-i-1
+    matriisi_maanosat[i,j+1]<-maanosa_arvot[j+p*70]
+  }
+  matriisi_maanosat[i][]<-maanosat[i]
+}
+
+# 4. lopuksi plotataan kaikki maat/maanosta sen elinikäodotuksen mukaan.
+# Maille
+
+for (i in 1:nrow(matriisi_maat)){
+  ika<-c()
+  for (j in 2:71){
+    ika<-append(ika,matriisi_maat[i,j])
+  }
+  plot(years,ika,main=matriisi_maat[i][1],xlab="Year",ylab="Life expectancy (years)")
+}
+
+# Maanosille
+
+for (i in 1:nrow(matriisi_maanosat)){
+  ika<-c()
+  for (j in 2:71){
+    ika<-append(ika,matriisi_maanosat[i,j])
+  }
+  plot(years,ika,main=matriisi_maanosat[i][1],xlab="Year",ylab="Life expectancy (years)")
+}
+```
+
+
+
+
+
+```{r}
+code_linear = "data {
+ int < lower =0 > N; // number of data points
+ int < lower =0 > Nc; //number of countries/continents
+ vector [N ] x ; // observation year
+ matrix [Nc,N] y; // observation life expectancies, Nc countries
+ real xpred ; // prediction year
+}
+
+parameters {
+  real alpha[Nc];
+  real beta[Nc];
+  real < lower =0 > sigma;
+  real bmu0;
+  real < lower =0 > bsigma0;
+  real amu0;
+  real < lower =0 > asigma0;
+}
+ 
+ model {
+   beta ~ normal(bmu0,bsigma0);
+   alpha ~ normal(amu0,asigma0);
+   
+   for ( j in 1: Nc ){
+      y[j, ] ~ normal (alpha[j] + beta[j]*x , sigma);
+   }
+ }
+ 
+ generated quantities {
+ real ypred[Nc];
+ for ( j in 1: Nc ){
+    ypred[j] = normal_rng(alpha[j] + beta[j] * xpred , sigma );
+ }
+}"
+
+
+
+countries_num <- matrix(as.numeric(matriisi_maat[,-1]),    # Convert to numeric matrix
+                  ncol = ncol(matriisi_maat[,-1]))
+
+continents_num <- matrix(as.numeric(matriisi_maanosat[,-1]),    # Convert to numeric matrix
+                  ncol = ncol(matriisi_maanosat[,-1]))
+
+data_countries <- list(x =years, y = countries_num, N = length(years) , Nc = maa_maara, xpred = 2030)
+data_continents <- list(x =years, y = continents_num, N = length(years) , Nc = maanosat_maara, xpred = 2030)
+
+
+
+sm_linear <- rstan::stan_model(model_code = code_linear)
+continents_linear_model <- rstan::sampling(sm_linear, data = data_continents, iter = 10000, control = list(max_treedepth = 15)) # 
+```
+```{r}
+monitor(continents_linear_model)
+draws_linear <- as.data.frame(continents_linear_model)
+```
+
+```{r}
+# jostain syystä koodi ei toimi loopissa vaan palauttaa NA
+means <- c(mean(draws_linear$`ypred[1]`),
+           mean(draws_linear$`ypred[2]`),
+           mean(draws_linear$`ypred[3]`),
+           mean(draws_linear$`ypred[4]`),
+           mean(draws_linear$`ypred[5]`),
+           mean(draws_linear$`ypred[6]`),
+           mean(draws_linear$`ypred[7]`),
+           mean(draws_linear$`ypred[8]`),
+           mean(draws_linear$`ypred[9]`),
+           mean(draws_linear$`ypred[10]`))
+
+for (i in 1:10){
+  ika<- c()
+  for (j in 2:71){
+    ika<-append(ika,matriisi_maanosat[i,j])
+  }
+  #print(i)
+  ika <- append(as.numeric(ika), means[i])
+  plot(append(years, 2030),ika,main=matriisi_maanosat[i][1],xlab="Year",ylab="Life expectancy (years)")
+}
+```
+
+```{r}
+code_cubic = "data {
+ int < lower =0 > N; // number of data points
+ int < lower =0 > Nc; //number of countries/continents
+ vector [N ] x ; // observation year
+ matrix [Nc,N] y; // observation life expectancies, Nc countries
+ real xpred ; // prediction year
+}
+
+parameters {
+  real A[Nc];
+  real B[Nc];
+  real C[Nc];
+  real D[Nc];
+  real < lower =0 > sigma;
+  real Amu0;
+  real < lower =0 > Asigma0;
+  real Bmu0;
+  real < lower =0 > Bsigma0;
+  real Cmu0;
+  real < lower =0 > Csigma0;
+  real Dmu0;
+  real < lower =0 > Dsigma0;
+}
+ 
+ model {
+   A ~ normal(Amu0,Asigma0);
+   B ~ normal(Bmu0,Bsigma0);
+   C ~ normal(Cmu0,Csigma0);
+   D ~ normal(Dmu0,Dsigma0);
+   
+   for ( j in 1: Nc ){
+      y[j, ] ~ normal (A[j]*exp(3 * log(x)) + B[j]*exp(2 * log(x)) + C[j]*x + D[j] , sigma);
+   }
+ }
+ 
+ generated quantities {
+ real ypred[Nc];
+ for ( j in 1: Nc ){
+    ypred[j] = normal_rng(A[j]*exp(3 * log(xpred)) + B[j]*exp(2 * log(xpred)) + C[j]*xpred + D[j] , sigma );
+ }
+}"
+
+sm_cubic <- rstan::stan_model(model_code = code_cubic)
+continents_cubic_model <- rstan::sampling(sm_cubic, data = data_continents, iter = 10000, control = list(max_treedepth = 15)) 
+```
+
