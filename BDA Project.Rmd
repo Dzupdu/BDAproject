@@ -95,6 +95,23 @@ for (i in 1:nrow(matriisi_maanosat)){
 
 
 
+```{r}
+countries_num <- matrix(as.numeric(matriisi_maat[,-1]),    # Convert to numeric matrix
+                  ncol = ncol(matriisi_maat[,-1]))
+
+continents_num <- matrix(as.numeric(matriisi_maanosat[,-1]),    # Convert to numeric matrix
+                  ncol = ncol(matriisi_maanosat[,-1]))
+
+# koko maailma erilleen maanosista HUOM, älä aja tätä solua uudelleen
+world_num <- continents_num[nrow(continents_num),]
+continents_num <- continents_num[-nrow(continents_num), ]
+maanosat_maara <- maanosat_maara - 1
+
+data_countries <- list(x =years, y = countries_num, N = length(years) , Nc = maa_maara, xpred = 2030)
+data_continents <- list(x =years, y = continents_num, N = length(years) , Nc = maanosat_maara, xpred = 2030)
+
+```
+
 
 
 ```{r}
@@ -117,6 +134,11 @@ parameters {
 }
  
  model {
+    bmu0 ~ normal(0,10); // yearly change/slope
+    amu0 ~ normal(0,20000); // 10*2000
+    bsigma0 ~ inv_chi_square(0.01); // deviation around 10
+    asigma0 ~ inv_chi_square(2.5e-09); // deviation around 20000
+    sigma ~ inv_chi_square(0.01); // deviation around 10 years
    beta ~ normal(bmu0,bsigma0);
    alpha ~ normal(amu0,asigma0);
    
@@ -132,28 +154,18 @@ parameters {
  }
 }"
 
-
-
-countries_num <- matrix(as.numeric(matriisi_maat[,-1]),    # Convert to numeric matrix
-                  ncol = ncol(matriisi_maat[,-1]))
-
-continents_num <- matrix(as.numeric(matriisi_maanosat[,-1]),    # Convert to numeric matrix
-                  ncol = ncol(matriisi_maanosat[,-1]))
-
-data_countries <- list(x =years, y = countries_num, N = length(years) , Nc = maa_maara, xpred = 2030)
-data_continents <- list(x =years, y = continents_num, N = length(years) , Nc = maanosat_maara, xpred = 2030)
-
-
-
 sm_linear <- rstan::stan_model(model_code = code_linear)
 continents_linear_model <- rstan::sampling(sm_linear, data = data_continents, iter = 10000, control = list(max_treedepth = 15)) # 
-```
-```{r}
-monitor(continents_linear_model)
-draws_linear <- as.data.frame(continents_linear_model)
+#tallenna sovitus tiedostoon
+continents_linear_model@stanmodel@dso <- new("cxxdso") 
+saveRDS(continents_linear_model, file = "continents_linear_model_wpriors.rds")
 ```
 
+
 ```{r}
+#continents_linear_model <- readRDS("continents_linear_model.rds")
+draws_linear <- as.data.frame(continents_linear_model)
+monitor(continents_linear_model)
 # jostain syystä koodi ei toimi loopissa vaan palauttaa NA
 means <- c(mean(draws_linear$`ypred[1]`),
            mean(draws_linear$`ypred[2]`),
@@ -163,10 +175,9 @@ means <- c(mean(draws_linear$`ypred[1]`),
            mean(draws_linear$`ypred[6]`),
            mean(draws_linear$`ypred[7]`),
            mean(draws_linear$`ypred[8]`),
-           mean(draws_linear$`ypred[9]`),
-           mean(draws_linear$`ypred[10]`))
+           mean(draws_linear$`ypred[9]`))
 
-for (i in 1:10){
+for (i in 1:9){
   ika<- c()
   for (j in 2:71){
     ika<-append(ika,matriisi_maanosat[i,j])
@@ -176,6 +187,53 @@ for (i in 1:10){
   plot(append(years, 2030),ika,main=matriisi_maanosat[i][1],xlab="Year",ylab="Life expectancy (years)")
 }
 ```
+
+
+```{r}
+code_cubic_single = "data {
+ int < lower =0 > N; // number of data points
+ vector[N ]  x ; // observation year
+ vector[N ] x2 ; // observation year
+ vector[N ]  x3 ; // observation year
+ vector[N ]  y; // observation life expectancies, Nc countries
+ real xpred ; // prediction year
+}
+
+parameters {
+  real A;
+  real B;
+  real C;
+  real D;
+  real < lower =0 > sigma;
+}
+transformed parameters {
+  vector[N ] mu = A*x3 + B*x2 + C*x + D;
+}
+ 
+ model {
+      //A ~ normal(0,100);
+      //B ~ normal(0,100);
+      //C ~ normal(0,100);
+      //D ~ normal(0,100);
+      //sigma ~inv_chi_square(0.01);
+      
+      y ~ normal (mu , sigma);
+   
+ }
+ 
+ generated quantities {
+  real ypred = normal_rng(A*xpred^3 + B*xpred^2 + C*xpred + D , sigma );
+}
+"
+
+data_world <- list(x =years,x2 =years^2,x3 =years^3, y = world_num, N = length(years), xpred = 2030)
+sm_cubic_single <- rstan::stan_model(model_code = code_cubic_single)
+world_cubic_model <- rstan::sampling(sm_cubic_single, data = data_world, iter = 20000, control = list(max_treedepth = 20))
+#world_cubic_model@stanmodel@dso <- new("cxxdso") 
+#saveRDS(world_cubic_model, file = "world_cubic_model.rds")
+```
+
+
 
 ```{r}
 code_cubic = "data {
@@ -222,5 +280,7 @@ parameters {
 
 sm_cubic <- rstan::stan_model(model_code = code_cubic)
 continents_cubic_model <- rstan::sampling(sm_cubic, data = data_continents, iter = 10000, control = list(max_treedepth = 15)) 
+#continents_cubic_model@stanmodel@dso <- new("cxxdso") 
+#saveRDS(continents_cubic_model, file = "continents_cubic_model.rds")
 ```
 
