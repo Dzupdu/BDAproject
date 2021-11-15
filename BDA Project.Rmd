@@ -305,7 +305,7 @@ parameters {
  generated quantities {
  real ypred[Nc];
  for ( j in 1: Nc ){
-    ypred[j] = normal_rng(A[j]*xpred1^3 + B[j]*xpred1^2 + C[j]*xpred1 + D , sigma);
+    ypred[j] = normal_rng(A[j]*xpred1^3 + B[j]*xpred1^2 + C[j]*xpred1 + D[j] , sigma);
  }
 }"
 
