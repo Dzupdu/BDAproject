@@ -91,11 +91,7 @@ for (i in 1:nrow(matriisi_maanosat)){
   }
   plot(years,ika,main=matriisi_maanosat[i][1],xlab="Year",ylab="Life expectancy (years)")
 }
-```
 
-
-
-```{r}
 countries_num <- matrix(as.numeric(matriisi_maat[,-1]),    # Convert to numeric matrix
                   ncol = ncol(matriisi_maat[,-1]))
 
@@ -111,6 +107,9 @@ data_countries <- list(x =years, y = countries_num, N = length(years) , Nc = maa
 data_continents <- list(x =years, y = continents_num, N = length(years) , Nc = maanosat_maara, xpred = 2030)
 
 ```
+
+
+
 
 
 
@@ -193,11 +192,21 @@ for (i in 1:9){
 code_cubic_single = "data {
  int < lower =0 > N; // number of data points
  vector[N ]  x ; // observation year
- vector[N ] x2 ; // observation year
- vector[N ]  x3 ; // observation year
  vector[N ]  y; // observation life expectancies, Nc countries
  real xpred ; // prediction year
 }
+
+transformed data{
+  vector[N ]  x1 = x - x[1]; // transform x to 0,1,2,3,4....
+  vector[N ]  x2 ;
+  vector[N ]  x3 ; 
+  real xpred1 = xpred - x[1];
+  for ( j in 1: N){
+    x2[j] = x1[j]*x1[j];
+    x3[j] = x2[j]*x1[j];
+  }
+}
+
 
 parameters {
   real A;
@@ -206,31 +215,32 @@ parameters {
   real D;
   real < lower =0 > sigma;
 }
-transformed parameters {
-  vector[N ] mu = A*x3 + B*x2 + C*x + D;
-}
+//transformed parameters {
+  //vector[N ] mu = A*x3 + B*x2 + C*x1 + D;
+//}
  
  model {
-      //A ~ normal(0,100);
-      //B ~ normal(0,100);
-      //C ~ normal(0,100);
-      //D ~ normal(0,100);
-      //sigma ~inv_chi_square(0.01);
+      A ~ normal(0,0.1);
+      B ~ normal(0,1);
+      C ~ normal(0,10);
+      D ~ normal(0,100);
+      sigma ~inv_chi_square(0.01);
       
-      y ~ normal (mu , sigma);
+      y ~ normal (A*x3 + B*x2 + C*x1 + D , sigma);
    
  }
  
  generated quantities {
-  real ypred = normal_rng(A*xpred^3 + B*xpred^2 + C*xpred + D , sigma );
+  real ypred = normal_rng(A*xpred1^3 + B*xpred1^2 + C*xpred1 + D , sigma );
 }
 "
 
-data_world <- list(x =years,x2 =years^2,x3 =years^3, y = world_num, N = length(years), xpred = 2030)
+data_world <- list(x =years, y = world_num, N = length(years), xpred = 2030)
 sm_cubic_single <- rstan::stan_model(model_code = code_cubic_single)
-world_cubic_model <- rstan::sampling(sm_cubic_single, data = data_world, iter = 20000, control = list(max_treedepth = 20))
-#world_cubic_model@stanmodel@dso <- new("cxxdso") 
-#saveRDS(world_cubic_model, file = "world_cubic_model.rds")
+world_cubic_model <- rstan::sampling(sm_cubic_single, data = data_world, iter = 10000, control = list(max_treedepth = 15))
+world_cubic_model@stanmodel@dso <- new("cxxdso") 
+saveRDS(world_cubic_model, file = "world_cubic_model.rds")
+monitor(world_cubic_model)
 ```
 
 
@@ -242,6 +252,17 @@ code_cubic = "data {
  vector [N ] x ; // observation year
  matrix [Nc,N] y; // observation life expectancies, Nc countries
  real xpred ; // prediction year
+}
+
+transformed data{
+  vector[N ]  x1 = x - x[1]; // transform x to 0,1,2,3,4....
+  vector[N ]  x2 ;
+  vector[N ]  x3 ; 
+  real xpred1 = xpred - x[1];
+  for ( j in 1: N){
+    x2[j] = x1[j]*x1[j];
+    x3[j] = x2[j]*x1[j];
+  }
 }
 
 parameters {
@@ -261,26 +282,56 @@ parameters {
 }
  
  model {
-   A ~ normal(Amu0,Asigma0);
-   B ~ normal(Bmu0,Bsigma0);
-   C ~ normal(Cmu0,Csigma0);
-   D ~ normal(Dmu0,Dsigma0);
+    Amu0 ~ normal(0,0.1);
+    Bmu0 ~ normal(0,1);
+    Cmu0 ~ normal(0,10);
+    Dmu0 ~ normal(0,100);
+    Asigma0 ~ inv_chi_square(0.01);
+    Bsigma0 ~ inv_chi_square(0.01);
+    Csigma0 ~ inv_chi_square(0.01);
+    Dsigma0 ~ inv_chi_square(0.01);
+    sigma ~ inv_chi_square(0.01);
    
-   for ( j in 1: Nc ){
-      y[j, ] ~ normal (A[j]*exp(3 * log(x)) + B[j]*exp(2 * log(x)) + C[j]*x + D[j] , sigma);
-   }
+    A ~ normal(Amu0,Asigma0);
+    B ~ normal(Bmu0,Bsigma0);
+    C ~ normal(Cmu0,Csigma0);
+    D ~ normal(Dmu0,Dsigma0);
+   
+    for ( j in 1: Nc ){
+      y[j, ] ~ normal (A[j]*x3 + B[j]*x2 + C[j]*x1 + D[j] , sigma);
+    }
  }
  
  generated quantities {
  real ypred[Nc];
  for ( j in 1: Nc ){
-    ypred[j] = normal_rng(A[j]*exp(3 * log(xpred)) + B[j]*exp(2 * log(xpred)) + C[j]*xpred + D[j] , sigma );
+    ypred[j] = normal_rng(A[j]*xpred1^3 + B[j]*xpred1^2 + C[j]*xpred1 + D , sigma);
  }
 }"
 
 sm_cubic <- rstan::stan_model(model_code = code_cubic)
 continents_cubic_model <- rstan::sampling(sm_cubic, data = data_continents, iter = 10000, control = list(max_treedepth = 15)) 
-#continents_cubic_model@stanmodel@dso <- new("cxxdso") 
-#saveRDS(continents_cubic_model, file = "continents_cubic_model.rds")
+continents_cubic_model@stanmodel@dso <- new("cxxdso") 
+saveRDS(continents_cubic_model, file = "continents_cubic_model.rds")
+```
+
+
+# MODEL COMPARISON AND LEAVE ONE OUT CROSS-VALIDATION (LOO)
+
+https://mc-stan.org/loo/articles/loo2-with-rstan.html
+http://avehtari.github.io/BDA_R_demos/demos_rstan/ppc/poisson-ppc.html
+
+```{r}
+library("loo")
+log_lik_1 <- extract_log_lik(fit_1, merge_chains = FALSE)
+r_eff <- relative_eff(exp(log_lik_1), cores = 2)
+loo_1 <- loo(log_lik_1, r_eff = r_eff, cores = 2)
+print(loo_1)
+
+# Do same for some other model and then compare with
+
+comp <- loo_compare(loo_1, loo_2)
+print(comp)
+
 ```
 
