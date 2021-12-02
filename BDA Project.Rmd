@@ -10,6 +10,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(readr)
 library(rstan)
+library("ggplot2")
+library("bayesplot")
 options(mc.cores = parallel::detectCores())
 life_expectancy <- read_csv("life-expectancy.csv")
 ```
@@ -154,9 +156,9 @@ parameters {
  
  model {
     bmu0 ~ normal(0,10); // yearly change/slope
-    amu0 ~ normal(50,100); // we have observations at x = 1 so lets just use something close to that
+    amu0 ~ normal(50,20); // we have observations at x = 1 so lets just use something close to that
     bsigma0 ~ inv_chi_square(0.01); // deviation around 10
-    asigma0 ~ inv_chi_square(0.0001); // deviation around 100
+    asigma0 ~ inv_chi_square(0.01); // deviation around 10
     sigma ~ inv_chi_square(0.01); // deviation around 10 years
    beta ~ normal(bmu0,bsigma0);
    alpha ~ normal(amu0,asigma0);
@@ -386,8 +388,8 @@ parameters {
  model {
     bmu0 ~ normal(0,100); // yearly change/slope
     amu0 ~ normal(0,100); // we have observations at x = 1 so lets just use something close to that
-    bsigma0 ~ inv_chi_square(0.0001); // deviation around 100
-    asigma0 ~ inv_chi_square(0.0001); // deviation around 100
+    bsigma0 ~ inv_chi_square(0.01); // deviation around 10
+    asigma0 ~ inv_chi_square(0.01); // deviation around 10
     sigma ~ inv_chi_square(0.01); // deviation around 10 years
     beta1 ~ exponential(0.1); // mean 10
     beta2 ~ exponential(0.1); // mean 10
@@ -428,6 +430,8 @@ continents_powerlaw <- rstan::sampling(sm_powerlaw, data = data_continents, cont
 continents_powerlaw@stanmodel@dso <- new("cxxdso") 
 saveRDS(continents_powerlaw, file = "continents_powerlaw.rds")
 ```
+
+
 ```{r}
 code_powerlaw_wdip = "data {
  int < lower =0 > N; // number of data points
@@ -465,24 +469,26 @@ parameters {
 
  
  model {
-    bmu0 ~ normal(0,100); // yearly change/slope
-    amu0 ~ normal(0,100); // we have observations at x = 1 so lets just use something close to that
-    bsigma0 ~ inv_chi_square(0.0001); // deviation around 100
-    asigma0 ~ inv_chi_square(0.0001); // deviation around 100
-    sigma ~ inv_chi_square(0.01); // deviation around 10 years
-    beta1 ~ exponential(0.1); // mean 10
+    bmu0 ~ normal(40,10); // yearly change/slope
+    amu0 ~ normal(90,15); // we have observations at x = 1 so lets just use something close to that
+    bsigma0 ~ inv_chi_square(0.001); // deviation around 10 
+    asigma0 ~ inv_chi_square(0.001); // deviation around 10
+    sigma ~ inv_chi_square(0.1); // deviation around 3 years
+    
+    beta1 ~ exponential(0.025); // mean 40
     beta2 ~ exponential(0.1); // mean 10
     lambda ~ beta(beta1, beta2); 
-    Amp ~ exponential(0.1);
+    
+    Amp ~ exponential(0.05);
     sigma_dip ~ inv_chi_square(0.01);
-    mu_dip ~ normal(35,20);
+    mu_dip ~ normal(20, 100);
     
    beta ~ normal(bmu0,bsigma0);
    alpha ~ normal(amu0,asigma0);
    
    for ( j in 1: Nc ){
      for ( i in 1: N ){
-        y[j, i] ~ normal(alpha[j] - beta[j] * pow(lambda[j], x1[i] - Amp[j]*normal_lpdf(i | mu_dip[j], sigma_dip[j]) ) , sigma);
+        y[j, i] ~ normal(alpha[j] - beta[j] * pow(lambda[j], x1[i]) - Amp[j]*exp(normal_lpdf(x1[i] | mu_dip[j], sigma_dip[j])), sigma);
      }
    }
  }
@@ -494,21 +500,21 @@ parameters {
     
     for ( j in 1: Nc ){
       for(i in (N+1):(N+Npred)){
-        ypred[j,i - N] = normal_rng(alpha[j] - beta[j] * pow(lambda[j], i)- Amp[j]*normal_lpdf(i | mu_dip[j], sigma_dip[j]) , sigma);
+        ypred[j,i - N] = normal_rng(alpha[j] - beta[j] * pow(lambda[j], i)- Amp[j]*exp(normal_lpdf(i | mu_dip[j], sigma_dip[j])) , sigma);
       }
     }
     
     for ( j in 1: Nc ){
       for ( i in 1: N){
-        log_like[(j-1)*N + i] = normal_lpdf(y[j, i] | (alpha[j] - beta[j] * pow(lambda[j], i)) - Amp[j]*normal_lpdf(i | mu_dip[j], sigma_dip[j]) , sigma);
-        y_rep[(j-1)*N + i] = normal_rng(alpha[j] - beta[j] * pow(lambda[j], i)- Amp[j]*normal_lpdf(i | mu_dip[j], sigma_dip[j]), sigma);
+        log_like[(j-1)*N + i] = normal_lpdf(y[j, i] | (alpha[j] - beta[j] * pow(lambda[j], i)) - Amp[j]*exp(normal_lpdf(i | mu_dip[j], sigma_dip[j])) , sigma);
+        y_rep[(j-1)*N + i] = normal_rng(alpha[j] - beta[j] * pow(lambda[j], i)- Amp[j]*exp(normal_lpdf(i | mu_dip[j], sigma_dip[j])), sigma);
       }
     }
 }
 "
 
 sm_powerlaw_wdip <- rstan::stan_model(model_code = code_powerlaw_wdip)
-continents_powerlaw_wdip <- rstan::sampling(sm_powerlaw_wdip, data = data_continents, control = list(max_treedepth = 15)) 
+continents_powerlaw_wdip <- rstan::sampling(sm_powerlaw_wdip, data = data_continents, iter = 6000, warmup = 5000 ,control = list(max_treedepth = 15,adapt_delta = 0.99) ) 
 continents_powerlaw_wdip@stanmodel@dso <- new("cxxdso") 
 saveRDS(continents_powerlaw_wdip, file = "continents_powerlaw_wdip.rds")
 ```
@@ -522,29 +528,144 @@ http://avehtari.github.io/BDA_R_demos/demos_rstan/ppc/poisson-ppc.html
 library("loo")
 options(mc.cores = 4)
 
-continents_linear_model <- readRDS("continents_linear_model_wpriors.rds")
-continents_powerlaw <- readRDS("continents_powerlaw.rds")
-continents_cubic_model <- readRDS("continents_cubic_model.rds")
+#continents_linear_model <- readRDS("continents_linear_model_wpriors.rds")
+#continents_powerlaw <- readRDS("continents_powerlaw.rds")
+#continents_powerlaw_priors <- readRDS("continents_powerlaw_priors.rds")
+#continents_cubic_model <- readRDS("continents_cubic_model.rds")
 
 loo_cubic <- loo(continents_cubic_model,pars = "log_like")
 loo_power <- loo(continents_powerlaw,pars = "log_like")
+loo_power_priors <- loo(continents_powerlaw_priors,pars = "log_like")
 loo_linear <- loo(continents_linear_model,pars = "log_like")
 
 print(loo_cubic)
 print(loo_power)
+print(loo_power_priors)
 print(loo_linear)
 
 ```
 ```{r}
-loo_compare(loo_cubic, loo_power,loo_linear)
+loo_compare(loo_cubic,loo_linear,loo_power,loo_power_priors)
+```
+```{r}
+monitor(continents_powerlaw_priors, pars = 'alpha')
+monitor(continents_powerlaw, pars = 'alpha')
 ```
 
 ```{r}
 par(mfrow=c(1,3))
-plot(loo_power, main = "Powerlaw fit Pareto-k")
-plot(loo_cubic, main = "cubic fit Pareto-k")
-plot(loo_linear, main = "linear fit Pareto-k")
+plot(loo_power_priors, main = "Exponential model Pareto-k")
+plot(loo_cubic, main = "Cubic model Pareto-k")
+plot(loo_linear, main = "Linear model Pareto-k")
 ```
 
 
+```{r}
+monitor(continents_powerlaw_wdip)
+```
 
+
+```{r}
+y_rep <- as.matrix(continents_linear_model, pars = "y_rep")
+
+# number of rows = number of post-warmup posterior draws
+# number of columns = length(y)
+
+
+#How many draws to plot
+Nplot <- 50
+cont <- 1
+ppc_dens_overlay(continents_num[cont,], y_rep[1:Nplot, 1+ (cont-1)*length(years):cont *length(years)])
+```
+
+
+```{r}
+library(reshape2)
+
+comp <- list(Old_priors = as.data.frame(continents_powerlaw)$`alpha[4]`, New_priors = as.data.frame(continents_powerlaw_priors)$`alpha[4]` )
+
+comp_data <- melt(comp)
+p_sens <- ggplot(comp_data,aes(x=value, fill=L1)) + geom_density(alpha=0.4)  +geom_vline(xintercept=quantile(comp$Old_priors,c(0.99)), colour = "red",size=0.5) +geom_vline(xintercept=quantile(comp$New_priors,c(0.99)), colour = "blue",size=0.5)
+
+p_sens +  labs(x = "a_4 parameter for Europe", fill = "legend")
+
+ggsave("sensitivity.png", plot = p_sens)
+
+```
+
+```{r}
+code_powerlaw = "data {
+ int < lower =0 > N; // number of data points
+ int < lower =0 > Nc; //number of countries/continents
+ matrix [Nc,N] y; // observation life expectancies, Nc countries
+ int< lower =0 > Npred ; // predict this many years forward
+}
+
+transformed data{
+  vector[N] x1; // just use years 1,2,...N instead giving x as argument
+  for ( i in 1: N){
+    x1[i] = i;
+  }
+  
+}
+
+parameters {
+  real alpha[Nc];
+  real beta[Nc];
+  real<lower=0,upper= 1> lambda[Nc];
+  
+  real < lower =0 > sigma;
+  real bmu0;
+  real < lower =0 > bsigma0;
+  real amu0;
+  real < lower =0 > asigma0;
+  real < lower =0 > beta1;
+  real < lower =0 > beta2;
+}
+
+ 
+ model {
+    bmu0 ~ normal(0,20); // yearly change/slope
+    amu0 ~ normal(0,20); // we have observations at x = 1 so lets just use something close to that
+    bsigma0 ~ inv_chi_square(1); // deviation around 10
+    asigma0 ~ inv_chi_square(1); // deviation around 10
+    sigma ~ inv_chi_square(1); // deviation around 10 years
+    beta1 ~ exponential(1); // mean 10
+    beta2 ~ exponential(1); // mean 10
+    lambda ~ beta(beta1, beta2); 
+    
+   beta ~ normal(bmu0,bsigma0);
+   alpha ~ normal(amu0,asigma0);
+   
+   for ( j in 1: Nc ){
+     for ( i in 1: N ){
+        y[j, i] ~ normal(alpha[j] - beta[j] * pow(lambda[j], x1[i]) , sigma);
+     }
+   }
+ }
+ 
+ generated quantities {
+    matrix [Nc,Npred] ypred;
+    vector [Nc*N] log_like;
+    vector [Nc*N] y_rep;
+    
+    for ( j in 1: Nc ){
+      for(i in (N+1):(N+Npred)){
+        ypred[j,i - N] = normal_rng(alpha[j] - beta[j] * pow(lambda[j], i) , sigma);
+      }
+    }
+    
+    for ( j in 1: Nc ){
+      for ( i in 1: N){
+        log_like[(j-1)*N + i] = normal_lpdf(y[j, i] | (alpha[j] - beta[j] * pow(lambda[j], i)) , sigma);
+        y_rep[(j-1)*N + i] = normal_rng(alpha[j] - beta[j] * pow(lambda[j], i), sigma);
+      }
+    }
+}
+"
+
+sm_powerlaw <- rstan::stan_model(model_code = code_powerlaw)
+continents_powerlaw <- rstan::sampling(sm_powerlaw, data = data_continents, control = list(max_treedepth = 15)) 
+continents_powerlaw@stanmodel@dso <- new("cxxdso") 
+saveRDS(continents_powerlaw, file = "continents_powerlaw.rds")
+```
