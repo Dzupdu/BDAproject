@@ -128,64 +128,7 @@ df_extract <- function(df_name, field, i ,j =0){
 
 
 ```{r}
-code_linear = "data {
- int < lower =0 > N; // number of data points
- int < lower =0 > Nc; //number of countries/continents
- matrix [Nc,N] y; // observation life expectancies, Nc countries
- int< lower =0 > Npred ; // predict this many years forward
-}
-
-transformed data{
-  vector[N] x1; // just use years 1,2,...N instead giving x as argument
-  for ( i in 1: N){
-    x1[i] = i;
-  }
-  
-}
-
-parameters {
-  real alpha[Nc];
-  real beta[Nc];
-  real < lower =0 > sigma;
-  real bmu0;
-  real < lower =0 > bsigma0;
-  real amu0;
-  real < lower =0 > asigma0;
-}
-
- 
- model {
-    bmu0 ~ normal(0,10); // yearly change/slope
-    amu0 ~ normal(50,20); // we have observations at x = 1 so lets just use something close to that
-    bsigma0 ~ inv_chi_square(0.01); // deviation around 10
-    asigma0 ~ inv_chi_square(0.01); // deviation around 10
-    sigma ~ inv_chi_square(0.01); // deviation around 10 years
-   beta ~ normal(bmu0,bsigma0);
-   alpha ~ normal(amu0,asigma0);
-   
-   for ( j in 1: Nc ){
-      y[j, ] ~ normal (alpha[j] + beta[j]*x1 , sigma);
-   }
- }
- 
- generated quantities {
-    matrix [Nc,Npred] ypred;
-    vector [Nc*N] log_like;
-    vector [Nc*N] y_rep;
-    
-    for ( j in 1: Nc ){
-      for(i in (N+1):(N+Npred)){
-        ypred[j,i - N] = normal_rng(alpha[j] + beta[j] * i , sigma);
-      }
-    }
-    
-    for ( j in 1: Nc ){
-      for ( i in 1: N){
-        log_like[(j-1)*N + i] = normal_lpdf(y[j, i] | (alpha[j] + beta[j] * i) , sigma);
-        y_rep[(j-1)*N + i] = normal_rng(alpha[j] + beta[j] * i , sigma);
-      }
-    }
-}
+code_linear = "
 "
 
 sm_linear <- rstan::stan_model(model_code = code_linear)
@@ -212,138 +155,12 @@ for (i in 1:9){
 ```
 
 
-```{r}
-code_cubic_single = "data {
- int < lower =0 > N; // number of data points
- vector[N ]  x ; // observation year
- vector[N ]  y; // observation life expectancies, Nc countries
- int xpred ; // prediction year
-}
 
-transformed data{
-  vector[N ]  x1 = x - x[1] + 1; // data starts at 1 for easy indexing
-  vector[N ]  x2 ;
-  vector[N ]  x3 ; 
-  int xpred1 = xpred - x[1];
-  for ( j in 1: N){
-    x2[j] = x1[j]*x1[j];
-    x3[j] = x2[j]*x1[j];
-  }
-}
-
-
-parameters {
-  real A;
-  real B;
-  real C;
-  real D;
-  real < lower =0 > sigma;
-}
-//transformed parameters {
-  //vector[N ] mu = A*x3 + B*x2 + C*x1 + D;
-//}
- 
- model {
-      A ~ normal(0,0.1);
-      B ~ normal(0,1);
-      C ~ normal(0,10);
-      D ~ normal(0,100);
-      sigma ~inv_chi_square(0.01);
-      
-      y ~ normal (A*x3 + B*x2 + C*x1 + D , sigma);
-   
- }
- 
- generated quantities {
-  real ypred = normal_rng(A*xpred1^3 + B*xpred1^2 + C*xpred1 + D , sigma );
-}
-"
-
-sm_cubic_single <- rstan::stan_model(model_code = code_cubic_single)
-world_cubic_model <- rstan::sampling(sm_cubic_single, data = data_world, iter = 10000, control = list(max_treedepth = 15))
-world_cubic_model@stanmodel@dso <- new("cxxdso") 
-saveRDS(world_cubic_model, file = "world_cubic_model.rds")
-monitor(world_cubic_model)
-```
 
 
 
 ```{r}
-code_cubic = "data {
- int < lower =0 > N; // number of data points
- int < lower =0 > Nc; //number of countries/continents
- matrix [Nc,N] y; // observation life expectancies, Nc countries
- int< lower =0 > Npred ; // prediction year
-}
-
-transformed data{
-  vector[N] x1;
-  vector[N] x2;
-  vector[N] x3;// just use years 1,2,...N instead giving x as argument
-  for ( i in 1: N){
-    x1[i] = i;
-    x2[i] = i*i;
-    x3[i] = i*i*i;
-  }
-  
-}
-
-parameters {
-  real A[Nc];
-  real B[Nc];
-  real C[Nc];
-  real D[Nc];
-  real < lower =0 > sigma;
-  real Amu0;
-  real < lower =0 > Asigma0;
-  real Bmu0;
-  real < lower =0 > Bsigma0;
-  real Cmu0;
-  real < lower =0 > Csigma0;
-  real Dmu0;
-  real < lower =0 > Dsigma0;
-}
- 
- model {
-    Amu0 ~ normal(0,0.1);
-    Bmu0 ~ normal(0,1);
-    Cmu0 ~ normal(0,10);
-    Dmu0 ~ normal(0,100);
-    Asigma0 ~ inv_chi_square(10);
-    Bsigma0 ~ inv_chi_square(1);
-    Csigma0 ~ inv_chi_square(0.1);
-    Dsigma0 ~ inv_chi_square(0.01);
-    sigma ~ inv_chi_square(0.001);
-   
-    A ~ normal(Amu0,Asigma0);
-    B ~ normal(Bmu0,Bsigma0);
-    C ~ normal(Cmu0,Csigma0);
-    D ~ normal(Dmu0,Dsigma0);
-   
-    for ( j in 1: Nc ){
-      y[j, ] ~ normal (A[j]*x3 + B[j]*x2 + C[j]*x1 + D[j] , sigma);
-    }
- }
- 
- generated quantities {
-    matrix [Nc,Npred] ypred;
-    vector [Nc*N] log_like;
-    vector [Nc*N] y_rep;
-    
-    for ( j in 1: Nc ){
-      for(i in (N+1):(N+Npred)){
-        ypred[j,i - N] = normal_rng(A[j]*i*i*i + B[j]*i*i + C[j]*i + D[j] , sigma);
-      }
-    }
-    
-    for ( j in 1: Nc ){
-      for ( i in 1: N){
-        log_like[(j-1)*N + i] = normal_lpdf(y[j, i] | (A[j]*i*i*i + B[j]*i*i + C[j]*i + D[j]) , sigma);
-        y_rep[(j-1)*N + i] = normal_rng(A[j]*i*i*i + B[j]*i*i + C[j]*i + D[j] , sigma);
-      }
-    }
-}
-"
+code_cubic = ""
 
 sm_cubic <- rstan::stan_model(model_code = code_cubic)
 continents_cubic_model <- rstan::sampling(sm_cubic, data = data_continents, control = list(max_treedepth = 15)) 
@@ -355,74 +172,7 @@ saveRDS(continents_cubic_model, file = "continents_cubic_model.rds")
 
 
 ```{r}
-code_powerlaw = "data {
- int < lower =0 > N; // number of data points
- int < lower =0 > Nc; //number of countries/continents
- matrix [Nc,N] y; // observation life expectancies, Nc countries
- int< lower =0 > Npred ; // predict this many years forward
-}
-
-transformed data{
-  vector[N] x1; // just use years 1,2,...N instead giving x as argument
-  for ( i in 1: N){
-    x1[i] = i;
-  }
-  
-}
-
-parameters {
-  real alpha[Nc];
-  real beta[Nc];
-  real<lower=0,upper= 1> lambda[Nc];
-  
-  real < lower =0 > sigma;
-  real bmu0;
-  real < lower =0 > bsigma0;
-  real amu0;
-  real < lower =0 > asigma0;
-  real < lower =0 > beta1;
-  real < lower =0 > beta2;
-}
-
- 
- model {
-    bmu0 ~ normal(0,100); // yearly change/slope
-    amu0 ~ normal(0,100); // we have observations at x = 1 so lets just use something close to that
-    bsigma0 ~ inv_chi_square(0.01); // deviation around 10
-    asigma0 ~ inv_chi_square(0.01); // deviation around 10
-    sigma ~ inv_chi_square(0.01); // deviation around 10 years
-    beta1 ~ exponential(0.1); // mean 10
-    beta2 ~ exponential(0.1); // mean 10
-    lambda ~ beta(beta1, beta2); 
-    
-   beta ~ normal(bmu0,bsigma0);
-   alpha ~ normal(amu0,asigma0);
-   
-   for ( j in 1: Nc ){
-     for ( i in 1: N ){
-        y[j, i] ~ normal(alpha[j] - beta[j] * pow(lambda[j], x1[i]) , sigma);
-     }
-   }
- }
- 
- generated quantities {
-    matrix [Nc,Npred] ypred;
-    vector [Nc*N] log_like;
-    vector [Nc*N] y_rep;
-    
-    for ( j in 1: Nc ){
-      for(i in (N+1):(N+Npred)){
-        ypred[j,i - N] = normal_rng(alpha[j] - beta[j] * pow(lambda[j], i) , sigma);
-      }
-    }
-    
-    for ( j in 1: Nc ){
-      for ( i in 1: N){
-        log_like[(j-1)*N + i] = normal_lpdf(y[j, i] | (alpha[j] - beta[j] * pow(lambda[j], i)) , sigma);
-        y_rep[(j-1)*N + i] = normal_rng(alpha[j] - beta[j] * pow(lambda[j], i), sigma);
-      }
-    }
-}
+code_powerlaw = "
 "
 
 sm_powerlaw <- rstan::stan_model(model_code = code_powerlaw)
@@ -433,84 +183,7 @@ saveRDS(continents_powerlaw, file = "continents_powerlaw.rds")
 
 
 ```{r}
-code_powerlaw_wdip = "data {
- int < lower =0 > N; // number of data points
- int < lower =0 > Nc; //number of countries/continents
- matrix [Nc,N] y; // observation life expectancies, Nc countries
- int< lower =0 > Npred ; // predict this many years forward
-}
-
-transformed data{
-  vector[N] x1; // just use years 1,2,...N instead giving x as argument
-  for ( i in 1: N){
-    x1[i] = i;
-  }
-  
-}
-
-parameters {
-  real alpha[Nc];
-  real beta[Nc];
-  real<lower=0,upper= 1> lambda[Nc];
-  
-  real < lower =0 > sigma;
-  real bmu0;
-  real < lower =0 > bsigma0;
-  real amu0;
-  real < lower =0 > asigma0;
-  real < lower =0 > beta1;
-  real < lower =0 > beta2;
-  
-  
-  real< lower =0 > Amp[Nc];
-  real  mu_dip[Nc];
-  real< lower =0 > sigma_dip[Nc];
-}
-
- 
- model {
-    bmu0 ~ normal(40,10); // yearly change/slope
-    amu0 ~ normal(90,15); // we have observations at x = 1 so lets just use something close to that
-    bsigma0 ~ inv_chi_square(0.001); // deviation around 10 
-    asigma0 ~ inv_chi_square(0.001); // deviation around 10
-    sigma ~ inv_chi_square(0.1); // deviation around 3 years
-    
-    beta1 ~ exponential(0.025); // mean 40
-    beta2 ~ exponential(0.1); // mean 10
-    lambda ~ beta(beta1, beta2); 
-    
-    Amp ~ exponential(0.05);
-    sigma_dip ~ inv_chi_square(0.01);
-    mu_dip ~ normal(20, 100);
-    
-   beta ~ normal(bmu0,bsigma0);
-   alpha ~ normal(amu0,asigma0);
-   
-   for ( j in 1: Nc ){
-     for ( i in 1: N ){
-        y[j, i] ~ normal(alpha[j] - beta[j] * pow(lambda[j], x1[i]) - Amp[j]*exp(normal_lpdf(x1[i] | mu_dip[j], sigma_dip[j])), sigma);
-     }
-   }
- }
- 
- generated quantities {
-    matrix [Nc,Npred] ypred;
-    vector [Nc*N] log_like;
-    vector [Nc*N] y_rep;
-    
-    for ( j in 1: Nc ){
-      for(i in (N+1):(N+Npred)){
-        ypred[j,i - N] = normal_rng(alpha[j] - beta[j] * pow(lambda[j], i)- Amp[j]*exp(normal_lpdf(i | mu_dip[j], sigma_dip[j])) , sigma);
-      }
-    }
-    
-    for ( j in 1: Nc ){
-      for ( i in 1: N){
-        log_like[(j-1)*N + i] = normal_lpdf(y[j, i] | (alpha[j] - beta[j] * pow(lambda[j], i)) - Amp[j]*exp(normal_lpdf(i | mu_dip[j], sigma_dip[j])) , sigma);
-        y_rep[(j-1)*N + i] = normal_rng(alpha[j] - beta[j] * pow(lambda[j], i)- Amp[j]*exp(normal_lpdf(i | mu_dip[j], sigma_dip[j])), sigma);
-      }
-    }
-}
+code_powerlaw_wdip = "
 "
 
 sm_powerlaw_wdip <- rstan::stan_model(model_code = code_powerlaw_wdip)
@@ -594,78 +267,131 @@ ggsave("sensitivity.png", plot = p_sens)
 ```
 
 ```{r}
-code_powerlaw = "data {
- int < lower =0 > N; // number of data points
- int < lower =0 > Nc; //number of countries/continents
- matrix [Nc,N] y; // observation life expectancies, Nc countries
- int< lower =0 > Npred ; // predict this many years forward
-}
-
-transformed data{
-  vector[N] x1; // just use years 1,2,...N instead giving x as argument
-  for ( i in 1: N){
-    x1[i] = i;
-  }
-  
-}
-
-parameters {
-  real alpha[Nc];
-  real beta[Nc];
-  real<lower=0,upper= 1> lambda[Nc];
-  
-  real < lower =0 > sigma;
-  real bmu0;
-  real < lower =0 > bsigma0;
-  real amu0;
-  real < lower =0 > asigma0;
-  real < lower =0 > beta1;
-  real < lower =0 > beta2;
-}
-
- 
- model {
-    bmu0 ~ normal(0,20); // yearly change/slope
-    amu0 ~ normal(0,20); // we have observations at x = 1 so lets just use something close to that
-    bsigma0 ~ inv_chi_square(1); // deviation around 10
-    asigma0 ~ inv_chi_square(1); // deviation around 10
-    sigma ~ inv_chi_square(1); // deviation around 10 years
-    beta1 ~ exponential(1); // mean 10
-    beta2 ~ exponential(1); // mean 10
-    lambda ~ beta(beta1, beta2); 
-    
-   beta ~ normal(bmu0,bsigma0);
-   alpha ~ normal(amu0,asigma0);
-   
-   for ( j in 1: Nc ){
-     for ( i in 1: N ){
-        y[j, i] ~ normal(alpha[j] - beta[j] * pow(lambda[j], x1[i]) , sigma);
-     }
-   }
- }
- 
- generated quantities {
-    matrix [Nc,Npred] ypred;
-    vector [Nc*N] log_like;
-    vector [Nc*N] y_rep;
-    
-    for ( j in 1: Nc ){
-      for(i in (N+1):(N+Npred)){
-        ypred[j,i - N] = normal_rng(alpha[j] - beta[j] * pow(lambda[j], i) , sigma);
-      }
-    }
-    
-    for ( j in 1: Nc ){
-      for ( i in 1: N){
-        log_like[(j-1)*N + i] = normal_lpdf(y[j, i] | (alpha[j] - beta[j] * pow(lambda[j], i)) , sigma);
-        y_rep[(j-1)*N + i] = normal_rng(alpha[j] - beta[j] * pow(lambda[j], i), sigma);
-      }
-    }
-}
+code_powerlaw = "
 "
 
 sm_powerlaw <- rstan::stan_model(model_code = code_powerlaw)
 continents_powerlaw <- rstan::sampling(sm_powerlaw, data = data_continents, control = list(max_treedepth = 15)) 
 continents_powerlaw@stanmodel@dso <- new("cxxdso") 
 saveRDS(continents_powerlaw, file = "continents_powerlaw.rds")
+```
+
+```{r}
+continents_linear_model <- readRDS("continents_linear_model_wpriors.rds")
+draws_linear <- as.data.frame(continents_linear_model)
+
+pdf(file="pred_linear.pdf")
+for (i in c(4)){
+  ika<- c()
+  a4<-extract(continents_linear_model, "alpha[4]", permuted=FALSE, inc_warmup=FALSE)
+  b4<-extract(continents_linear_model, "beta[4]", permuted=FALSE, inc_warmup=FALSE)
+  for (j in 2:71){
+    ika<-append(ika,matriisi_maanosat[i,j])
+  }
+
+  years_ennuste<-append(years,2020:2049)
+  malli <- numeric(100) 
+  ika_ennuste_Q5 <- numeric(100)
+  ika_ennuste_Q95<- numeric(100)
+  
+  for (j in 1:length(years_ennuste)){
+    #malliQ <-df_extract("draws_linear", "ypred", i, j)
+    malliQ <- a4 + b4*j
+    
+    malli[j] <- mean(malliQ)
+    ika_ennuste_Q5[j] <-quantile(malliQ, c(0.05))
+    ika_ennuste_Q95[j]<-quantile(malliQ, c(0.95))
+  }
+  
+  plot(years,ika,main="Europe (linear model fit)",xlab="Year",ylab="Life expectancy (years)",xlim=c(1950,2050),ylim=c(67,91))
+  lines(years_ennuste,malli,col="red", lwd=2)
+  lines(years_ennuste, ika_ennuste_Q5, col="red", type="l", lty=2, lwd=1)
+  lines(years_ennuste,ika_ennuste_Q95,  col="red", type="l", lty=2, lwd=1)
+  legend("bottomright",legend=c("Data", "Prediction" , "90% predictive interval"), col = c("black", "red","red"),pch = c(1,26,26),lty=c(0,1,2))
+}
+dev.off()
+
+
+```
+```{r}
+continents_powerlaw <- readRDS("continents_powerlaw.rds")
+
+pdf(file="pred_exponent.pdf")
+for (i in c(4)){
+  ika<- c()
+  a4<-extract(continents_powerlaw, "alpha[4]", permuted=FALSE, inc_warmup=FALSE)
+  b4<-extract(continents_powerlaw, "beta[4]", permuted=FALSE, inc_warmup=FALSE)
+  lambda4 <-extract(continents_powerlaw, "lambda[4]", permuted=FALSE, inc_warmup=FALSE)
+  
+  for (j in 2:71){
+    ika<-append(ika,matriisi_maanosat[i,j])
+  }
+
+  
+  years_ennuste<-append(years,2020:2049)
+  malli <- numeric(100) 
+  ika_ennuste_Q5 <- numeric(100)
+  ika_ennuste_Q95<- numeric(100)
+  
+  for (j in 1:length(years_ennuste)){
+    #malliQ <-df_extract("draws_linear", "ypred", i, j)
+    malliQ <- a4 - b4*(lambda4^j)
+    
+    malli[j] <- mean(malliQ)
+    ika_ennuste_Q5[j] <-quantile(malliQ, c(0.05))
+    ika_ennuste_Q95[j]<-quantile(malliQ, c(0.95))
+  }
+  
+  plot(years,ika,main="Europe (exponential model fit)",xlab="Year",ylab="Life expectancy (years)",xlim=c(1950,2050),ylim=c(67,91))
+  lines(years_ennuste,malli,col="red", lwd=2)
+  lines(years_ennuste, ika_ennuste_Q5, col="red", type="l", lty=2, lwd=1)
+  lines(years_ennuste,ika_ennuste_Q95,  col="red", type="l", lty=2, lwd=1)
+  legend("bottomright",legend=c("Data", "Prediction" , "90% predictive interval"), col = c("black", "red","red"),pch = c(1,26,26),lty=c(0,1,2))
+}
+dev.off()
+
+
+```
+
+
+```{r}
+
+continents_cubic <- readRDS("continents_cubic_model.rds")
+
+pdf(file="pred_cubic.pdf")
+for (i in c(4)){
+  ika<- c()
+  A <-extract(continents_cubic, "A[4]", permuted=FALSE, inc_warmup=FALSE)
+  B <-extract(continents_cubic, "B[4]", permuted=FALSE, inc_warmup=FALSE)
+  C <-extract(continents_cubic, "C[4]", permuted=FALSE, inc_warmup=FALSE)
+  D <-extract(continents_cubic, "D[4]", permuted=FALSE, inc_warmup=FALSE)
+  
+  for (j in 2:71){
+    ika<-append(ika,matriisi_maanosat[i,j])
+  }
+
+  
+  years_ennuste<-append(years,2020:2049)
+  malli <- numeric(100) 
+  ika_ennuste_Q5 <- numeric(100)
+  ika_ennuste_Q95<- numeric(100)
+  
+  for (j in 1:length(years_ennuste)){
+    #malliQ <-df_extract("draws_linear", "ypred", i, j)
+    malliQ <- A*j^3 + B*j^2 + C*j + D
+    
+    malli[j] <- mean(malliQ)
+    ika_ennuste_Q5[j] <-quantile(malliQ, c(0.05))
+    ika_ennuste_Q95[j]<-quantile(malliQ, c(0.95))
+  }
+  
+  plot(years,ika,main="Europe (cubic model fit)",xlab="Year",ylab="Life expectancy (years)",xlim=c(1950,2050),ylim=c(67,91))
+  lines(years_ennuste,malli,col="red", lwd=2)
+  lines(years_ennuste, ika_ennuste_Q5, col="red", type="l", lty=2, lwd=1)
+  lines(years_ennuste,ika_ennuste_Q95,  col="red", type="l", lty=2, lwd=1)
+  legend("bottomright",legend=c("Data", "Prediction" , "90% predictive interval"), col = c("black", "red","red"),pch = c(1,26,26),lty=c(0,1,2))
+}
+dev.off()
+
+
 ```
